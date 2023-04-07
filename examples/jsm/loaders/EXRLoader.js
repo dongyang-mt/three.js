@@ -3,7 +3,7 @@ import {
 	DataUtils,
 	FloatType,
 	HalfFloatType,
-	LinearEncoding,
+	NoColorSpace,
 	LinearFilter,
 	RedFormat,
 	RGBAFormat
@@ -1749,11 +1749,21 @@ class EXRLoader extends DataTextureLoader {
 
 		const parseInt64 = function ( dataView, offset ) {
 
-			const Int64 = Number( dataView.getBigInt64( offset.value, true ) );
+			let int;
+
+			if ( 'getBigInt64' in DataView.prototype ) {
+
+				int = Number( dataView.getBigInt64( offset.value, true ) );
+
+			} else {
+
+				int = dataView.getUint32( offset.value + 4, true ) + Number( dataView.getUint32( offset.value, true ) << 32 );
+
+			}
 
 			offset.value += ULONG_SIZE;
 
-			return Int64;
+			return int;
 
 		};
 
@@ -2062,7 +2072,7 @@ class EXRLoader extends DataTextureLoader {
 				uncompress: null,
 				getter: null,
 				format: null,
-				encoding: null,
+				colorSpace: NoColorSpace,
 			};
 
 			switch ( EXRHeader.compression ) {
@@ -2194,12 +2204,12 @@ class EXRLoader extends DataTextureLoader {
 			if ( EXRDecoder.outputChannels == 4 ) {
 
 				EXRDecoder.format = RGBAFormat;
-				EXRDecoder.encoding = LinearEncoding;
+				EXRDecoder.colorSpace = NoColorSpace;
 
 			} else {
 
 				EXRDecoder.format = RedFormat;
-				EXRDecoder.encoding = LinearEncoding;
+				EXRDecoder.colorSpace = NoColorSpace;
 
 			}
 
@@ -2262,7 +2272,7 @@ class EXRLoader extends DataTextureLoader {
 			height: EXRDecoder.height,
 			data: EXRDecoder.byteArray,
 			format: EXRDecoder.format,
-			encoding: EXRDecoder.encoding,
+			colorSpace: EXRDecoder.colorSpace,
 			type: this.type,
 		};
 
@@ -2279,7 +2289,7 @@ class EXRLoader extends DataTextureLoader {
 
 		function onLoadCallback( texture, texData ) {
 
-			texture.encoding = texData.encoding;
+			texture.colorSpace = texData.colorSpace;
 			texture.minFilter = LinearFilter;
 			texture.magFilter = LinearFilter;
 			texture.generateMipmaps = false;

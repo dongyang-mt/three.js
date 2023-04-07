@@ -27,6 +27,7 @@ const wgslTypeLib = {
 	int: 'i32',
 	uint: 'u32',
 	bool: 'bool',
+	color: 'vec3<f32>',
 
 	vec2: 'vec2<f32>',
 	ivec2: 'vec2<i32>',
@@ -126,18 +127,6 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 	}
 
-	addFlowCode( code ) {
-
-		if ( ! /;\s*$/.test( code ) ) {
-
-			code += ';';
-
-		}
-
-		super.addFlowCode( code + '\n\t' );
-
-	}
-
 	getSampler( textureProperty, uvSnippet, shaderStage = this.shaderStage ) {
 
 		if ( shaderStage === 'fragment' ) {
@@ -151,6 +140,20 @@ class WebGPUNodeBuilder extends NodeBuilder {
 			const dimension = `textureDimensions( ${textureProperty}, 0 )`;
 
 			return `textureLoad( ${textureProperty}, threejs_repeatWrapping( ${uvSnippet}, ${dimension} ), 0 )`;
+
+		}
+
+	}
+
+	getVideoSampler( textureProperty, uvSnippet, shaderStage = this.shaderStage ) {
+
+		if ( shaderStage === 'fragment' ) {
+
+			return `textureSampleBaseClampToEdge( ${textureProperty}, ${textureProperty}_sampler, vec2<f32>( ${uvSnippet}.x, 1.0 - ${uvSnippet}.y ) )`;
+
+		} else {
+
+			console.error( `WebGPURenderer: THREE.VideoTexture does not support ${ shaderStage } shader.` );
 
 		}
 
@@ -174,27 +177,39 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 	}
 
-	getTexture( textureProperty, uvSnippet, shaderStage = this.shaderStage ) {
+	getTexture( texture, textureProperty, uvSnippet, shaderStage = this.shaderStage ) {
 
-		return this.getSampler( textureProperty, uvSnippet, shaderStage );
+		let snippet = null;
+
+		if ( texture.isVideoTexture === true ) {
+
+			snippet = this.getVideoSampler( textureProperty, uvSnippet, shaderStage );
+
+		} else {
+
+			snippet = this.getSampler( textureProperty, uvSnippet, shaderStage );
+
+		}
+
+		return snippet;
 
 	}
 
-	getTextureLevel( textureProperty, uvSnippet, biasSnippet, shaderStage = this.shaderStage ) {
+	getTextureLevel( texture, textureProperty, uvSnippet, biasSnippet, shaderStage = this.shaderStage ) {
 
-		return this.getSamplerLevel( textureProperty, uvSnippet, biasSnippet, shaderStage );
+		let snippet = null;
 
-	}
+		if ( texture.isVideoTexture === true ) {
 
-	getCubeTexture( textureProperty, uvSnippet, shaderStage = this.shaderStage ) {
+			snippet = this.getVideoSampler( textureProperty, uvSnippet, shaderStage );
 
-		return this.getSampler( textureProperty, uvSnippet, shaderStage );
+		} else {
 
-	}
+			snippet = this.getSamplerLevel( textureProperty, uvSnippet, biasSnippet, shaderStage );
 
-	getCubeTextureLevel( textureProperty, uvSnippet, biasSnippet, shaderStage = this.shaderStage ) {
+		}
 
-		return this.getSamplerLevel( textureProperty, uvSnippet, biasSnippet, shaderStage );
+		return snippet;
 
 	}
 
@@ -415,13 +430,13 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 		const snippets = [];
 
+		if ( shaderStage === 'compute' ) {
+
+			this.getBuiltin( 'global_invocation_id', 'id', 'vec3<u32>', 'attribute' );
+
+		}
+
 		if ( shaderStage === 'vertex' || shaderStage === 'compute' ) {
-
-			if ( shaderStage === 'compute' ) {
-
-				this.getBuiltin( 'global_invocation_id', 'id', 'vec3<u32>', 'attribute' );
-
-			}
 
 			for ( const { name, property, type } of this.builtins.attribute.values() ) {
 
@@ -474,26 +489,9 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 			this.getBuiltin( 'position', 'Vertex', 'vec4<f32>', 'vertex' );
 
-			const varyings = this.varyings;
-			const vars = this.vars[ shaderStage ];
+		}
 
-			for ( let index = 0; index < varyings.length; index ++ ) {
-
-				const varying = varyings[ index ];
-
-				if ( varying.needsInterpolation ) {
-
-					snippets.push( `@location( ${index} ) ${ varying.name } : ${ this.getType( varying.type ) }` );
-
-				} else if ( vars.includes( varying ) === false ) {
-
-					vars.push( varying );
-
-				}
-
-			}
-
-		} else if ( shaderStage === 'fragment' ) {
+		if ( shaderStage === 'vertex' || shaderStage === 'fragment' ) {
 
 			const varyings = this.varyings;
 			const vars = this.vars[ shaderStage ];
@@ -540,7 +538,7 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 		for ( const uniform of uniforms ) {
 
-			if ( uniform.type === 'texture' ) {
+			if ( uniform.type === 'texture' || uniform.type === 'cubeTexture' ) {
 
 				if ( shaderStage === 'fragment' ) {
 
@@ -548,17 +546,29 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 				}
 
-				bindingSnippets.push( `@group( 0 ) @binding( ${index ++} ) var ${uniform.name} : texture_2d<f32>;` );
+				const texture = uniform.node.value;
 
-			} else if ( uniform.type === 'cubeTexture' ) {
+				let textureType;
 
-				if ( shaderStage === 'fragment' ) {
+				if ( texture.isCubeTexture === true ) {
 
-					bindingSnippets.push( `@group( 0 ) @binding( ${index ++} ) var ${uniform.name}_sampler : sampler;` );
+					textureType = 'texture_cube<f32>';
+
+				} else if ( texture.isDepthTexture === true ) {
+
+					textureType = 'texture_depth_2d';
+
+				} else if ( texture.isVideoTexture === true ) {
+
+					textureType = 'texture_external';
+
+				} else {
+
+					textureType = 'texture_2d<f32>';
 
 				}
 
-				bindingSnippets.push( `@group( 0 ) @binding( ${index ++} ) var ${uniform.name} : texture_cube<f32>;` );
+				bindingSnippets.push( `@group( 0 ) @binding( ${index ++} ) var ${uniform.name} : ${textureType};` );
 
 			} else if ( uniform.type === 'buffer' || uniform.type === 'storageBuffer' ) {
 
@@ -611,9 +621,8 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 		for ( const shaderStage in shadersData ) {
 
-			let flow = '// code\n';
-			flow += `\t${ this.flowCode[ shaderStage ] }`;
-			flow += '\n\t';
+			let flow = '// code\n\n';
+			flow += this.flowCode[ shaderStage ];
 
 			const flowNodes = this.flowNodes[ shaderStage ];
 			const mainNode = flowNodes[ flowNodes.length - 1 ];
@@ -627,7 +636,7 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 					if ( flow.length > 0 ) flow += '\n';
 
-					flow += `\t// FLOW -> ${ slotName }\n\t`;
+					flow += `\t// flow -> ${ slotName }\n\t`;
 
 				}
 
@@ -635,7 +644,7 @@ class WebGPUNodeBuilder extends NodeBuilder {
 
 				if ( node === mainNode && shaderStage !== 'compute' ) {
 
-					flow += '// FLOW RESULT\n\t';
+					flow += '// result\n\t';
 
 					if ( shaderStage === 'vertex' ) {
 

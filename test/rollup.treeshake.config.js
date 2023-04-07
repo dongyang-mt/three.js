@@ -1,12 +1,12 @@
 import path from 'path';
 import resolve from '@rollup/plugin-node-resolve';
 import filesize from 'rollup-plugin-filesize';
-import { terser } from 'rollup-plugin-terser';
+import terser from '@rollup/plugin-terser';
 import { visualizer } from 'rollup-plugin-visualizer';
-import { glconstants, glsl } from '../utils/build/rollup.config';
+import { glsl } from '../utils/build/rollup.config.js';
 import chalk from 'chalk';
 
-const statsFile = path.resolve( __dirname, './treeshake/stats.html' );
+const statsFile = path.resolve( 'test/treeshake/stats.html' );
 
 function logStatsFile() {
 
@@ -55,7 +55,6 @@ export default [
 	{
 		input: 'test/treeshake/index-src.js',
 		plugins: [
-			glconstants(),
 			glsl(),
 			terser(),
 			visualizer( {
@@ -67,6 +66,19 @@ export default [
 			{
 				format: 'esm',
 				file: 'test/treeshake/index-src.bundle.min.js'
+			}
+		]
+	},
+	// esm bundle size minified, used in read-size.yml
+	{
+		input: 'build/three.module.js',
+		plugins: [
+			terser(),
+		],
+		output: [
+			{
+				format: 'esm',
+				file: 'test/treeshake/three.module.min.js'
 			}
 		]
 	},
